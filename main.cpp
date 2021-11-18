@@ -4,7 +4,7 @@
 #include <time.h>
 
 #define BOARD_SIZE 8
-#define EPISODE 1600
+#define EPISODE 1
 
 typedef struct {
 	int x;
@@ -99,6 +99,20 @@ void setUniformDistributionToArray(float* output, int count) {
 	for (int i = 0; i < count; i++) output[i] = (rand() + 0.5) / (RAND_MAX + 1);
 }
 
+int setRandomIndex(int min, int max) {
+	srand((unsigned int)time(NULL));
+
+	return rand() % (max - min + 1) + min;
+}
+
+//ランダム行動:2、Q値から1
+int selectEpisilonOrGreedy(float epsilon_start, float epsilon_end, float epsilon_decay, int episode) {
+	const float threshold = epsilon_end + (epsilon_start - epsilon_end) * expf(-episode / epsilon_decay);
+	srand((unsigned int)time(NULL) + (unsigned int)episode * 100);
+
+	return (rand() + 0.5) / (RAND_MAX + 1) < threshold ? 2 : 1;
+}
+
 enable_put checkPutCapability(int* board, int current_color) {
 	enable_put check = { {0}, 0 };
 	for (int address = 0; address < BOARD_SIZE * BOARD_SIZE; address++) {
@@ -155,7 +169,7 @@ float calcReward(int* board, int put_number, int effort) {
 	float reward = 0.0;
 	int black = 0, white = 0;
 	if (effort == 60) {
-		for (int index = 0; index < BOARD_SIZE * BOARD_SIZE, index++) {
+		for (int index = 0; index < BOARD_SIZE * BOARD_SIZE; index++) {
 			if (board[index] == 1) black++;
 			else white++;
 		}
@@ -177,6 +191,16 @@ int choicePutValue(enable_put enable_array, array_with_index* q_value) {
 	}
 
 	return -1;
+}
+
+int choiceRamdomPutValue(enable_put enable_array, int count) {
+	int tmp = 0;
+	for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+		if (enable_array.enable[i] == 1) {
+			tmp++;
+			if (tmp == count) return i;
+		}
+	}
 }
 
 /************************
@@ -258,6 +282,7 @@ int main() {
 
 	for (int episode = 0; episode < EPISODE; episode++) {
 		while (effort <= 60) {
+			int put_value;
 			const enable_put enable_array = checkPutCapability(board, current_color);
 
 			if (enable_array.count == 0) {
@@ -265,12 +290,24 @@ int main() {
 				continue;
 			}
 
-			if()
-			qsort(q_value_with_index, BOARD_SIZE * BOARD_SIZE, sizeof(array_with_index), cmpDescValue);
-			const int put_value = choicePutValue(enable_array, q_value_with_index);
+			if (current_color == 1) {
+				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 20, episode);
+				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(0, enable_array.count - 1));
+				else {
+					calcForwardpropagation(board, q_value, middle_weight, combined_weight, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
+					setIndex(q_value_with_index, q_value, BOARD_SIZE * BOARD_SIZE);
+					qsort(q_value_with_index, BOARD_SIZE * BOARD_SIZE, sizeof(array_with_index), cmpDescValue);
+					put_value = choicePutValue(enable_array, q_value_with_index);
+				}
+			}
+			else {
+				//put_value = choiceRamdomPutValue(enable_array, setRandomIndex(0, enable_array.count - 1));
+				printEnablePut(enable_array);
+				scanf_s("%d", &put_value);
+			}
 			putBoard(board, put_value, current_color);
 			effort++;
-			const float reward = calcReward(board, put_value, effort);
+			//const float reward = calcReward(board, put_value, effort);
 			current_color *= -1;
 			printBoard(board);
 		}
