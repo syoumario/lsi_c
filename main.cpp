@@ -102,7 +102,7 @@ void setUniformDistributionToArray(float* output, int count) {
 int setRandomIndex(int min, int max) {
 	srand((unsigned int)time(NULL));
 
-	return rand() % (max - min + 1) + min;
+	return (rand() % (max - min + 1)) + min;
 }
 
 //ランダム行動:2、Q値から1
@@ -270,9 +270,9 @@ void printEnablePut(enable_put enable_array) {
 
 int main() {
 	int board[BOARD_SIZE * BOARD_SIZE] = { 0 }; //空きマス:0、白:-1、黒：1
-	float middle_weight[BOARD_SIZE * BOARD_SIZE * BOARD_SIZE  * BOARD_SIZE], combined_weight[BOARD_SIZE * BOARD_SIZE];
+	float middle_weight[BOARD_SIZE * BOARD_SIZE * BOARD_SIZE  * BOARD_SIZE], combined_weight[BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE];
 	setUniformDistributionToArray(middle_weight, BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE);
-	setUniformDistributionToArray(combined_weight, BOARD_SIZE * BOARD_SIZE);
+	setUniformDistributionToArray(combined_weight, BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE);
 
 	int effort = 1, current_color=1;
 	resetBoard(board);
@@ -286,13 +286,14 @@ int main() {
 			const enable_put enable_array = checkPutCapability(board, current_color);
 
 			if (enable_array.count == 0) {
+				puts("パス");
 				current_color *= -1;
 				continue;
 			}
 
 			if (current_color == 1) {
 				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 20, episode);
-				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(0, enable_array.count - 1));
+				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count));
 				else {
 					calcForwardpropagation(board, q_value, middle_weight, combined_weight, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
 					setIndex(q_value_with_index, q_value, BOARD_SIZE * BOARD_SIZE);
@@ -301,9 +302,7 @@ int main() {
 				}
 			}
 			else {
-				//put_value = choiceRamdomPutValue(enable_array, setRandomIndex(0, enable_array.count - 1));
-				printEnablePut(enable_array);
-				scanf_s("%d", &put_value);
+				put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count));
 			}
 			putBoard(board, put_value, current_color);
 			effort++;
