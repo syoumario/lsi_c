@@ -117,6 +117,7 @@ int setRandomIndex(int min, int max, int seed) {
 }
 
 void setUniqueIndexArray(int* output, int output_count, int count) {
+	srand((unsigned int)time(NULL) + (unsigned int)rand());
 	int* flg, done = 0;
 	flg = (int*)malloc(output_count * sizeof(int));
 	for (int i = 0; i < output_count; i++) flg[i] = (int)0;
@@ -205,13 +206,17 @@ void putBoard(int* board, int number, int current_color) {
 float calcReward(int* board, int black_put_number, int white_put_number, int effort) {
 	float reward = 0.0;
 	int black = 0, white = 0;
+	for (int index = 0; index < BOARD_SIZE * BOARD_SIZE; index++) {
+		if (board[index] == 1) black++;
+		else white++;
+	}
 	if (effort == 60) {
-		for (int index = 0; index < BOARD_SIZE * BOARD_SIZE; index++) {
-			if (board[index] == 1) black++;
-			else white++;
-		}
 		if (black > white) reward++;
-		else if (black < white) reward--;
+		else if (black <= white) reward--;
+	}
+	else if(white == 0 || black == 0){
+		if (white == 0) reward++;
+		if (black == 0) reward--;
 	}
 
 	if (black_put_number == 0 || black_put_number == 7 || black_put_number == 56 || black_put_number == 63) reward += 0.2;
@@ -260,6 +265,8 @@ void calcForwardFullcombined(float* input, float* output, float* weight, int inp
 	for (int i = 0; i < output_dim; i++) output[i] = 0;
 
 	for (int j = 0; j < input_dim * output_dim; j++) output[j / input_dim] += input[j % input_dim] * weight[j];
+
+	for (int k = 0; k < output_dim; k++) output[k] = tanhf(output[k]);
 }
 
 void calcForwardpropagation(int* input, float* output, float* weight_middle, float* weight_full, int input_dim, int middle_dim, int output_dim) {
@@ -318,6 +325,7 @@ void updateWeight(float* middle_weight, float* final_weight, float* middle_delta
 
 	for (int i = 0; i < output_dim * middle_dim; i++) {
 		final_weight[i] = final_weight[i] - epsilon * final_delta[i] / BATCH_SIZE;
+		if (i == output_dim * middle_dim - 1) printf("%lf\n", final_delta[i]);
 	}
 }
 void doTrainQNetwork(experience_reply* reply, float* middle_weight, float* final_weight, int input_dim, int middle_dim, int output_dim) {
@@ -342,7 +350,7 @@ void doTrainQNetwork(experience_reply* reply, float* middle_weight, float* final
 				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;
 			}
 			else
-				diff_q_value[i] = 0;
+				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;//diff_q_value[i] = 0;
 		}
 		calcErrorBackPropagation(batch[batch_index].state, diff_q_value, middle_output, final_delta, middle_delta, input_dim, output_dim, middle_dim);
 		updateWeight(middle_weight, final_weight, middle_delta, final_delta, 0.1, input_dim, middle_dim, output_dim);
@@ -398,7 +406,7 @@ int main() {
 	setUniformDistributionToArray(middle_weight, BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE);
 	setUniformDistributionToArray(combined_weight, BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE);
 
-	int effort = 1, current_color=1, memory_index = 0;
+	int effort = 1, current_color=1, memory_index = 0, pass=0;
 	resetBoard(board);
 	array_with_index q_value_with_index[BOARD_SIZE * BOARD_SIZE];
 	float q_value[BOARD_SIZE * BOARD_SIZE] = { 0 };
@@ -409,17 +417,22 @@ int main() {
 			doTrainQNetwork(memory, middle_weight, combined_weight, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
 			resetEpisode(memory);
 		}
-		int prev_color = 0, now_color = 0;
+		int prev_color = 0, now_color = 0, black_put_value = 999, white_put_value = 999;
 		resetBoard(board);
 		effort = 1;
+		current_color = 1;
+		pass = 0;
 		while (effort <= 60) {
-			int put_value, black_put_value=999, white_put_value=999, state[BOARD_SIZE * BOARD_SIZE];
+			int put_value, state[BOARD_SIZE * BOARD_SIZE];
 			const enable_put enable_array = checkPutCapability(board, current_color);
 
+			if (pass == 2) break;
 			if (enable_array.count == 0) {
 				current_color *= -1;
+				pass++;
 				continue;
 			}
+			else pass = 0;
 
 			copyIntArray(board, state, BOARD_SIZE * BOARD_SIZE);
 
@@ -427,7 +440,6 @@ int main() {
 				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 20, episode);
 				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, 0));
 				else {
-					printf("%d\n", episode);
 					calcForwardpropagation(board, q_value, middle_weight, combined_weight, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
 					setIndex(q_value_with_index, q_value, BOARD_SIZE * BOARD_SIZE);
 					qsort(q_value_with_index, BOARD_SIZE * BOARD_SIZE, sizeof(array_with_index), cmpDescValue);
@@ -444,16 +456,55 @@ int main() {
 				now_color = current_color;
 			}
 			putBoard(board, put_value, current_color);
-			effort++;
-
 			if (prev_color == 1 && now_color == -1) {
 				memory[memory_index % MEMORY_SIZE] = createRecoed(state, black_put_value, board, calcReward(board, black_put_value, white_put_value, effort));
 				memory_index++;
 			}
+			effort++;
+
 			current_color *= -1;
 			//printBoard(board);
 		}
 	}
+	int win = 0;
+	for (int index = 0;index < 100; index++) {
+		resetBoard(board);
+		effort = 1;
+		current_color = 1;
+		pass = 0;
+		while (effort <= 60) {
+			if (pass == 2)break;
+			int put_value, state[BOARD_SIZE * BOARD_SIZE];
+			const enable_put enable_array = checkPutCapability(board, current_color);
 
+			if (enable_array.count == 0) {
+				current_color *= -1;
+				pass++;
+				continue;
+			}
+			else pass = 0;
+
+			copyIntArray(board, state, BOARD_SIZE * BOARD_SIZE);
+
+			if (current_color == 1) {
+				calcForwardpropagation(board, q_value, middle_weight, combined_weight, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
+				setIndex(q_value_with_index, q_value, BOARD_SIZE * BOARD_SIZE);
+				qsort(q_value_with_index, BOARD_SIZE * BOARD_SIZE, sizeof(array_with_index), cmpDescValue);
+				put_value = choicePutValue(enable_array, q_value_with_index);
+			}
+			else {
+				put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, index));
+			}
+			putBoard(board, put_value, current_color);
+			if (calcReward(board, 999, 999, effort) >= 0.9) {
+				win++;
+			}
+			effort++;
+
+			current_color *= -1;
+		}
+		printBoard(board);
+	}
+	printf("%d\n", win);
 	return 0;
 }
