@@ -4,7 +4,10 @@
 #include <time.h>
 
 #define BOARD_SIZE 8
-#define EPISODE 1
+#define EPISODE 1600
+#define MEMORY_SIZE 800
+#define BATCH_SIZE 400
+#define EPISODE_INTERVAL 80
 
 typedef struct {
 	int x;
@@ -93,16 +96,38 @@ void setIndex(array_with_index* src, float *value, int count) {
 	}
 }
 
+void copyIntArray(int* src, int* dst, int count) {
+	for (int i = 0; i < count; i++) dst[i] = src[i];
+}
+
+void copyFloatArray(float* src, float* dst, int count) {
+	for (int i = 0; i < count; i++) dst[i] = src[i];
+}
+
 void setUniformDistributionToArray(float* output, int count) {
 	srand((unsigned int)time(NULL));
 
 	for (int i = 0; i < count; i++) output[i] = (rand() + 0.5) / (RAND_MAX + 1);
 }
 
-int setRandomIndex(int min, int max) {
-	srand((unsigned int)time(NULL));
+int setRandomIndex(int min, int max, int seed) {
+	srand((unsigned int)time(NULL) + seed);
 
 	return (rand() % (max - min + 1)) + min;
+}
+
+void setUniqueIndexArray(int* output, int output_count, int count) {
+	int* flg, done = 0;
+	flg = (int*)malloc(output_count * sizeof(int));
+	for (int i = 0; i < output_count; i++) flg[i] = (int)0;
+	while (done <= count) {
+		const int tmp = rand() % output_count;
+		if (flg[tmp] == 0) {
+			output[done] = tmp;
+			flg[tmp] = 1;
+			done++;
+		}
+	}
 }
 
 //ランダム行動:2、Q値から1
@@ -138,6 +163,18 @@ enable_put checkPutCapability(int* board, int current_color) {
 	return check;
 }
 
+experience_reply createRecoed(int* state, int action, int* next_state, float reward) {
+	experience_reply a;
+	for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+		a.state[i] = state[i];
+		a.next_state[i] = next_state[i];
+	}
+	a.action = action;
+	a.reward = reward;
+
+	return a;
+}
+
 void putBoard(int* board, int number, int current_color) {
 	board[number] = current_color;
 	float reward = 0;
@@ -165,7 +202,7 @@ void putBoard(int* board, int number, int current_color) {
 	}
 }
 
-float calcReward(int* board, int put_number, int effort) {
+float calcReward(int* board, int black_put_number, int white_put_number, int effort) {
 	float reward = 0.0;
 	int black = 0, white = 0;
 	if (effort == 60) {
@@ -177,10 +214,10 @@ float calcReward(int* board, int put_number, int effort) {
 		else if (black < white) reward--;
 	}
 
-	if (put_number == 0 || put_number == 7 || put_number == 56 || put_number == 63) reward += 0.2;
+	if (black_put_number == 0 || black_put_number == 7 || black_put_number == 56 || black_put_number == 63) reward += 0.2;
 	//HACK:見づらい
-	else if (put_number == 1 || put_number == 8 || put_number == 9 || put_number == 6 || put_number == 14 || put_number == 15 || put_number == 48
-		|| put_number == 49 || put_number == 57 || put_number == 54 || put_number == 55 || put_number == 62) reward -= 0.1;
+	else if (black_put_number == 1 || black_put_number == 8 || black_put_number == 9 || black_put_number == 6 || black_put_number == 14 || black_put_number == 15 || black_put_number == 48
+		|| black_put_number == 49 || black_put_number == 57 || black_put_number == 54 || black_put_number == 55 || black_put_number == 62) reward -= 0.1;
 
 	return reward;
 }
@@ -238,11 +275,97 @@ void calcForwardpropagation(int* input, float* output, float* weight_middle, flo
 
 ************************/
 
+/************************
+
+誤差逆伝搬
+
+************************/
+
+void pullOutExperienceMemory(experience_reply* src, experience_reply* dst, int batch_size, int memory_size) {
+	int* batch_array;
+	batch_array = (int*)malloc(batch_size * sizeof(int));
+	setUniqueIndexArray(batch_array, memory_size, batch_size);
+
+	for (int i = 0; i < batch_size; i++) {
+		dst[i] = src[batch_array[i]];
+	}
+}
+
+void calcForwardpropagationInBackpropagation(int* input, float* output, float* weight_middle, float *middle_output, float* weight_full, int input_dim, int middle_dim, int output_dim) {
+	calcForwardMiddleClass(input, middle_output, weight_middle, input_dim, middle_dim);
+	calcForwardFullcombined(middle_output, output, weight_full, middle_dim, output_dim);
+}
+
+void calcErrorBackPropagation(int *input, float* d3, float* middle_output, float* final_delta, float* middle_delta, int input_dim, int final_dim, int middle_dim) {
+	for (int i = 0; i < final_dim * middle_dim; i++) {
+		final_delta[i] = d3[i % final_dim] * middle_output[i / middle_dim];
+	}
+
+	float tmp_middle[BOARD_SIZE * BOARD_SIZE] = { 0 };
+	for (int j = 0; j < BOARD_SIZE * BOARD_SIZE; j++) {
+		tmp_middle[j / middle_dim] += d3[j % final_dim] / powf(coshf(atanhf(middle_output[j / middle_dim])), 2);
+	}
+
+	for (int j = 0; j < middle_dim * input_dim; j++) {
+		middle_delta[j] = tmp_middle[j / middle_dim] * input[j % input_dim];
+	}
+}
+
+void updateWeight(float* middle_weight, float* final_weight, float* middle_delta, float* final_delta, float epsilon, int input_dim, int middle_dim, int output_dim) {
+	for (int i = 0; i < input_dim * middle_dim; i++) {
+		middle_weight[i] = middle_weight[i] - epsilon * middle_delta[i] / BATCH_SIZE;
+	}
+
+	for (int i = 0; i < output_dim * middle_dim; i++) {
+		final_weight[i] = final_weight[i] - epsilon * final_delta[i] / BATCH_SIZE;
+	}
+}
+void doTrainQNetwork(experience_reply* reply, float* middle_weight, float* final_weight, int input_dim, int middle_dim, int output_dim) {
+	experience_reply batch[BATCH_SIZE];
+	float target_middle_weight[BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE], target_final_weight[BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE];
+	float target_q_value[BOARD_SIZE * BOARD_SIZE], q_value[BOARD_SIZE * BOARD_SIZE], diff_q_value[BOARD_SIZE * BOARD_SIZE];
+	float middle_output[BOARD_SIZE * BOARD_SIZE];
+	float middle_delta[BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE], final_delta[BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE];
+	copyFloatArray(middle_weight, target_middle_weight, BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE);
+	copyFloatArray(final_weight, target_final_weight, BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE);
+	pullOutExperienceMemory(reply, batch, BATCH_SIZE, MEMORY_SIZE);
+
+	for (int batch_index = 0; batch_index < BATCH_SIZE; batch_index++) {
+		calcForwardpropagation(batch[batch_index].next_state, target_q_value, target_middle_weight, target_final_weight, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
+		calcForwardpropagationInBackpropagation(batch[batch_index].state, q_value, middle_weight, middle_output, final_weight, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
+		array_with_index q_value_with_index[BOARD_SIZE * BOARD_SIZE];
+		setIndex(q_value_with_index, target_q_value, BOARD_SIZE * BOARD_SIZE);
+		qsort(q_value_with_index, BOARD_SIZE * BOARD_SIZE, sizeof(array_with_index), cmpDescValue);
+
+		for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+			if (i == q_value_with_index[0].index) {
+				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;
+			}
+			else
+				diff_q_value[i] = 0;
+		}
+		calcErrorBackPropagation(batch[batch_index].state, diff_q_value, middle_output, final_delta, middle_delta, input_dim, output_dim, middle_dim);
+		updateWeight(middle_weight, final_weight, middle_delta, final_delta, 0.1, input_dim, middle_dim, output_dim);
+	}
+}
+
+/************************
+
+誤差逆伝搬終わり
+
+************************/
+
 void resetBoard(int* board) {
 	for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
 		if (i == 27 || i == 36) board[i] = -1;
 		else if (i == 28 || i == 35) board[i] = 1;
 		else board[i] = 0;
+	}
+}
+
+void resetEpisode(experience_reply* input) {
+	for (int i = 0; i < MEMORY_SIZE; i++) {
+		input[i] = { {0},0,{0},0 };
 	}
 }
 
@@ -270,45 +393,65 @@ void printEnablePut(enable_put enable_array) {
 
 int main() {
 	int board[BOARD_SIZE * BOARD_SIZE] = { 0 }; //空きマス:0、白:-1、黒：1
+	experience_reply memory[MEMORY_SIZE];
 	float middle_weight[BOARD_SIZE * BOARD_SIZE * BOARD_SIZE  * BOARD_SIZE], combined_weight[BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE];
 	setUniformDistributionToArray(middle_weight, BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE);
 	setUniformDistributionToArray(combined_weight, BOARD_SIZE * BOARD_SIZE * BOARD_SIZE * BOARD_SIZE);
 
-	int effort = 1, current_color=1;
+	int effort = 1, current_color=1, memory_index = 0;
 	resetBoard(board);
 	array_with_index q_value_with_index[BOARD_SIZE * BOARD_SIZE];
 	float q_value[BOARD_SIZE * BOARD_SIZE] = { 0 };
 	setIndex(q_value_with_index, q_value, BOARD_SIZE * BOARD_SIZE);
 
 	for (int episode = 0; episode < EPISODE; episode++) {
+		if (episode % EPISODE_INTERVAL == 0 && episode != 0) {
+			doTrainQNetwork(memory, middle_weight, combined_weight, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
+			resetEpisode(memory);
+		}
+		int prev_color = 0, now_color = 0;
+		resetBoard(board);
+		effort = 1;
 		while (effort <= 60) {
-			int put_value;
+			int put_value, black_put_value=999, white_put_value=999, state[BOARD_SIZE * BOARD_SIZE];
 			const enable_put enable_array = checkPutCapability(board, current_color);
 
 			if (enable_array.count == 0) {
-				puts("パス");
 				current_color *= -1;
 				continue;
 			}
 
+			copyIntArray(board, state, BOARD_SIZE * BOARD_SIZE);
+
 			if (current_color == 1) {
 				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 20, episode);
-				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count));
+				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, 0));
 				else {
+					printf("%d\n", episode);
 					calcForwardpropagation(board, q_value, middle_weight, combined_weight, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
 					setIndex(q_value_with_index, q_value, BOARD_SIZE * BOARD_SIZE);
 					qsort(q_value_with_index, BOARD_SIZE * BOARD_SIZE, sizeof(array_with_index), cmpDescValue);
 					put_value = choicePutValue(enable_array, q_value_with_index);
 				}
+				black_put_value = put_value;
+				prev_color = now_color;
+				now_color = current_color;
 			}
 			else {
-				put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count));
+				put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, 0));
+				white_put_value = put_value;
+				prev_color = now_color;
+				now_color = current_color;
 			}
 			putBoard(board, put_value, current_color);
 			effort++;
-			//const float reward = calcReward(board, put_value, effort);
+
+			if (prev_color == 1 && now_color == -1) {
+				memory[memory_index % MEMORY_SIZE] = createRecoed(state, black_put_value, board, calcReward(board, black_put_value, white_put_value, effort));
+				memory_index++;
+			}
 			current_color *= -1;
-			printBoard(board);
+			//printBoard(board);
 		}
 	}
 
