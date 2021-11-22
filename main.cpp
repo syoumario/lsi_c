@@ -4,7 +4,7 @@
 #include <time.h>
 
 #define BOARD_SIZE 8
-#define EPISODE 1600
+#define EPISODE 5000
 #define MEMORY_SIZE 800
 #define BATCH_SIZE 400
 #define EPISODE_INTERVAL 80
@@ -325,7 +325,7 @@ void updateWeight(float* middle_weight, float* final_weight, float* middle_delta
 
 	for (int i = 0; i < output_dim * middle_dim; i++) {
 		final_weight[i] = final_weight[i] - epsilon * final_delta[i] / BATCH_SIZE;
-		if (i == output_dim * middle_dim - 1) printf("%lf\n", final_delta[i]);
+		//if (i == output_dim * middle_dim - 1) printf("%lf\n", final_delta[i]);
 	}
 }
 void doTrainQNetwork(experience_reply* reply, float* middle_weight, float* final_weight, int input_dim, int middle_dim, int output_dim) {
@@ -467,7 +467,7 @@ int main() {
 		}
 	}
 	int win = 0;
-	for (int index = 0;index < 100; index++) {
+	for (int index = 0;index < 300; index++) {
 		resetBoard(board);
 		effort = 1;
 		current_color = 1;
@@ -503,7 +503,7 @@ int main() {
 
 			current_color *= -1;
 		}
-		printBoard(board);
+		//printBoard(board);
 	}
 	printf("%d\n", win);
 	return 0;
