@@ -4,7 +4,7 @@
 #include <time.h>
 
 #define BOARD_SIZE 8 //盤面の一辺の数
-#define EPISODE 10000 //エピソード数
+#define EPISODE 15000 //エピソード数
 #define MEMORY_SIZE 800 //一度に保存するExperience Replyの数
 #define BATCH_SIZE 400 //バッチサイズ
 #define EPISODE_INTERVAL 80 //学習を行う頻度
@@ -137,6 +137,7 @@ void setUniqueIndexArray(int* output, int output_count, int count) {
 			done++;
 		}
 	}
+	free(flg);
 }
 
 //ランダム行動:2、Q値から1
@@ -305,6 +306,7 @@ void calcForwardpropagation(int* input, float* output, float* weight_middle, flo
 	middle_output = (float*)malloc(middle_dim * sizeof(float));
 	calcForwardMiddleClass(input, middle_output, weight_middle, input_dim, middle_dim);
 	calcForwardFullcombined(middle_output, output, weight_full, middle_dim, output_dim);
+	free(middle_output);
 }
 
 /************************
@@ -327,6 +329,7 @@ void pullOutExperienceMemory(experience_reply* src, experience_reply* dst, int b
 	for (int i = 0; i < batch_size; i++) {
 		dst[i] = src[batch_array[i]];
 	}
+	//free(batch_array);
 }
 
 void calcForwardpropagationInBackpropagation(int* input, float* output, float* weight_middle, float *middle_output, float* weight_full, int input_dim, int middle_dim, int output_dim) {
@@ -472,7 +475,7 @@ int main() {
 			createState(board, state); //ここをいじる
 
 			if (current_color == 1) {
-				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 20, episode);
+				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 35, episode);
 				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, 0));
 				else {
 					calcForwardpropagation(state, q_value, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
@@ -503,7 +506,8 @@ int main() {
 		}
 	}
 	int win = 0;
-	for (int index = 0;index < 300; index++) {
+
+	for (int index = 0;index < 1000; index++) {
 		resetBoard(board);
 		effort = 1;
 		current_color = 1;
