@@ -10,7 +10,7 @@
 #define EPISODE_INTERVAL 80 //ŠwK‚ğs‚¤•p“x
 
 #define INPUT_DIM 5 //“ü—ÍŸŒ³ió‘Ô”j
-#define MIDDLE_DIM 64 //‰B‚ê‘w‚ÌŸŒ³
+#define MIDDLE_DIM 16 //‰B‚ê‘w‚ÌŸŒ³
 #define OUTPUT_DIM 64 //o—ÍŸŒ³
 
 typedef struct {
@@ -343,7 +343,7 @@ void calcErrorBackPropagation(int *input, float* d3, float* middle_output, float
 	}
 
 	float tmp_middle[BOARD_SIZE * BOARD_SIZE] = { 0 };
-	for (int j = 0; j < BOARD_SIZE * BOARD_SIZE; j++) {
+	for (int j = 0; j < middle_dim * final_dim; j++) {
 		tmp_middle[j / middle_dim] += d3[j % final_dim] / powf(coshf(atanhf(middle_output[j / middle_dim])), 2);
 	}
 
@@ -475,7 +475,7 @@ int main() {
 			createState(board, state); //‚±‚±‚ğ‚¢‚¶‚é
 
 			if (current_color == 1) {
-				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 35, episode);
+				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 20, episode);
 				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, 0));
 				else {
 					calcForwardpropagation(state, q_value, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
