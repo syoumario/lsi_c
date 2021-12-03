@@ -4,13 +4,13 @@
 #include <time.h>
 
 #define BOARD_SIZE 8 //盤面の一辺の数
-#define EPISODE 15000 //エピソード数
+#define EPISODE 20000 //エピソード数
 #define MEMORY_SIZE 800 //一度に保存するExperience Replyの数
 #define BATCH_SIZE 400 //バッチサイズ
 #define EPISODE_INTERVAL 80 //学習を行う頻度
 
 #define INPUT_DIM 5 //入力次元（状態数）
-#define MIDDLE_DIM 16 //隠れ層の次元
+#define MIDDLE_DIM 32 //隠れ層の次元
 #define OUTPUT_DIM 64 //出力次元
 
 typedef struct {
@@ -337,14 +337,14 @@ void calcForwardpropagationInBackpropagation(int* input, float* output, float* w
 	calcForwardFullcombined(middle_output, output, weight_full, middle_dim, output_dim);
 }
 
-void calcErrorBackPropagation(int *input, float* d3, float* middle_output, float* final_delta, float* middle_delta, int input_dim, int final_dim, int middle_dim) {
+void calcErrorBackPropagation(int* input, float* d3, float* middle_output, float* final_weight,  float* final_delta, float* middle_delta, int input_dim, int final_dim, int middle_dim) {
 	for (int i = 0; i < final_dim * middle_dim; i++) {
 		final_delta[i] = d3[i % final_dim] * middle_output[i / middle_dim];
 	}
 
-	float tmp_middle[BOARD_SIZE * BOARD_SIZE] = { 0 };
+	float tmp_middle[MIDDLE_DIM * OUTPUT_DIM] = { 0 };
 	for (int j = 0; j < middle_dim * final_dim; j++) {
-		tmp_middle[j / middle_dim] += d3[j % final_dim] / powf(coshf(atanhf(middle_output[j / middle_dim])), 2);
+		tmp_middle[j / middle_dim] += d3[j % final_dim] * final_weight[j] / powf(coshf(atanhf(middle_output[j / middle_dim])), 2);
 	}
 
 	for (int j = 0; j < middle_dim * input_dim; j++) {
@@ -386,7 +386,7 @@ void doTrainQNetwork(experience_reply* reply, float* middle_weight, float* final
 			else
 				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;//diff_q_value[i] = 0;
 		}
-		calcErrorBackPropagation(batch[batch_index].state, diff_q_value, middle_output, final_delta, middle_delta, input_dim, output_dim, middle_dim);
+		calcErrorBackPropagation(batch[batch_index].state, diff_q_value, middle_output, final_weight, final_delta, middle_delta, input_dim, output_dim, middle_dim);
 		updateWeight(middle_weight, final_weight, middle_delta, final_delta, 0.1, input_dim, middle_dim, output_dim);
 	}
 }
@@ -475,7 +475,7 @@ int main() {
 			createState(board, state); //ここをいじる
 
 			if (current_color == 1) {
-				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 20, episode);
+				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 35, episode);
 				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, 0));
 				else {
 					calcForwardpropagation(state, q_value, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
