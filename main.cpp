@@ -9,9 +9,9 @@
 #define BATCH_SIZE 400 //バッチサイズ
 #define EPISODE_INTERVAL 80 //学習を行う頻度
 
-#define INPUT_DIM 5 //入力次元（状態数）
+#define INPUT_DIM 4 //入力次元（状態数）
 #define MIDDLE_DIM 32 //隠れ層の次元
-#define OUTPUT_DIM 64 //出力次元
+#define OUTPUT_DIM 3 //出力次元
 
 typedef struct {
 	int x;
