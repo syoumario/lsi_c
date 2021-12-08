@@ -389,10 +389,10 @@ void doTrainQNetwork(history* history, experience_reply* reply, float* middle_we
 
 		for (int i = 0; i < OUTPUT_DIM; i++) {
 			if (i == q_value_with_index[0].index) {
-				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;
+				diff_q_value[i] = q_value[i] - batch[batch_index].reward * 0.99 * q_value_with_index[0].value;
 			}
 			else
-				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;//diff_q_value[i] = 0;
+				diff_q_value[i] = q_value[i] - batch[batch_index].reward * 0.99 * q_value_with_index[0].value;//diff_q_value[i] = 0;
 			if (batch_index % 20 == 0)history[history_index].error += diff_q_value[i] / OUTPUT_DIM;
 		}
 		if (batch_index % 20 == 0)history[history_index].epoch = history_index;
