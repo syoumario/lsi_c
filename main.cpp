@@ -1,26 +1,27 @@
-#include<stdio.h>
+ï»¿#include<stdio.h>
 #include <stdlib.h>
 #include<math.h>
 #include <time.h>
+#include <iostream>
 
-#define BOARD_SIZE 8 //”Õ–Ê‚Ìˆê•Ó‚Ì”
-#define EPISODE 20000 //ƒGƒsƒ\[ƒh”
-#define MEMORY_SIZE 800 //ˆê“x‚É•Û‘¶‚·‚éExperience Reply‚Ì”
-#define BATCH_SIZE 400 //ƒoƒbƒ`ƒTƒCƒY
-#define EPISODE_INTERVAL 80 //ŠwK‚ğs‚¤•p“x
+#define BOARD_SIZE 8 //ç›¤é¢ã®ä¸€è¾ºã®æ•°
+#define EPISODE 20000 //ã‚¨ãƒ”ã‚½ãƒ¼ãƒ‰æ•°
+#define MEMORY_SIZE 800 //ä¸€åº¦ã«ä¿å­˜ã™ã‚‹Experience Replyã®æ•°
+#define BATCH_SIZE 400 //ãƒãƒƒãƒã‚µã‚¤ã‚º
+#define EPISODE_INTERVAL 80 //å­¦ç¿’ã‚’è¡Œã†é »åº¦
 
-#define INPUT_DIM 5 //“ü—ÍŸŒ³ió‘Ô”j
-#define MIDDLE_DIM 32 //‰B‚ê‘w‚ÌŸŒ³
-#define OUTPUT_DIM 64 //o—ÍŸŒ³
+#define INPUT_DIM 5 //å…¥åŠ›æ¬¡å…ƒï¼ˆçŠ¶æ…‹æ•°ï¼‰
+#define MIDDLE_DIM 32 //éš ã‚Œå±¤ã®æ¬¡å…ƒ
+#define OUTPUT_DIM 64 //å‡ºåŠ›æ¬¡å…ƒ
 
 typedef struct {
 	int x;
 	int y;
 } coordinate;
 
-//éŒ¾‚É‰Šú‰»–Y‚ê‚È‚¢(0‚Å‰Šú‰»)
+//å®£è¨€æ™‚ã«åˆæœŸåŒ–å¿˜ã‚Œãªã„(0ã§åˆæœŸåŒ–)
 typedef struct {
-	int enable[64]; //1‚¾‚Æ’u‚¯‚é
+	int enable[64]; //1ã ã¨ç½®ã‘ã‚‹
 	int count;
 } enable_put;
 
@@ -36,7 +37,14 @@ typedef struct {
 	float reward;
 } experience_reply;
 
-//is•ûŒü
+typedef struct {
+	float error;
+	int epoch;
+} history;
+int history_index = 0;
+#define SAVE_HISTORY_NAME "C:/Users/metar/Desktop/history.csv";
+
+//é€²è¡Œæ–¹å‘
 const coordinate direction[8]{
 	{1,-1},
 	{1,0},
@@ -48,7 +56,7 @@ const coordinate direction[8]{
 	{0,-1},
 };
 
-//	q’l(~‡)
+//	qå€¤(é™é †)
 int cmpDescValue(const void* n1, const void* n2)
 {
 	if (((array_with_index*)n1)->value < ((array_with_index*)n2)->value)
@@ -140,7 +148,7 @@ void setUniqueIndexArray(int* output, int output_count, int count) {
 	free(flg);
 }
 
-//ƒ‰ƒ“ƒ_ƒ€s“®:2AQ’l‚©‚ç1
+//ãƒ©ãƒ³ãƒ€ãƒ è¡Œå‹•:2ã€Qå€¤ã‹ã‚‰1
 int selectEpisilonOrGreedy(float epsilon_start, float epsilon_end, float epsilon_decay, int episode) {
 	const float threshold = epsilon_end + (epsilon_start - epsilon_end) * expf(-episode / epsilon_decay);
 	srand((unsigned int)time(NULL) + (unsigned int)episode * 100);
@@ -213,17 +221,17 @@ void putBoard(int* board, int number, int current_color) {
 }
 
 /*
-* state[0]F©•ª‚ÌŠp‚ÌÎ‚Ì”
-* state[1]F‘Šè‚ÌŠp‚ÌÎ‚Ì”
-* state[2]F©•ª‚ÌÎ‚Ì”-‘Šè‚ÌÎ‚Ì”
-* state[3]FÎ‚Ì’u‚©‚ê‚Ä‚¢‚È‚¢êŠ‚Ì”
-* state[4]F•s—˜‚É‚È‚éêŠ‚É’u‚©‚ê‚Ä‚¢‚éÎ‚Ì”F©•ª-‘Šè
+* state[0]ï¼šè‡ªåˆ†ã®è§’ã®çŸ³ã®æ•°
+* state[1]ï¼šç›¸æ‰‹ã®è§’ã®çŸ³ã®æ•°
+* state[2]ï¼šè‡ªåˆ†ã®çŸ³ã®æ•°-ç›¸æ‰‹ã®çŸ³ã®æ•°
+* state[3]ï¼šçŸ³ã®ç½®ã‹ã‚Œã¦ã„ãªã„å ´æ‰€ã®æ•°
+* state[4]ï¼šä¸åˆ©ã«ãªã‚‹å ´æ‰€ã«ç½®ã‹ã‚Œã¦ã„ã‚‹çŸ³ã®æ•°ï¼šè‡ªåˆ†-ç›¸æ‰‹
 */
 void createState(int* board, int* state) {
 	for (int i = 0; i < INPUT_DIM;i++) state[i] = 0;
 
 	for (int i = 0;i < BOARD_SIZE * BOARD_SIZE; i++) {
-		if (i == 0 || i == 7 || i == 56 || i == 63) { //Šp
+		if (i == 0 || i == 7 || i == 56 || i == 63) { //è§’
 			if (board[i] == 1) state[0]++;
 			else if (board[i] == -1) state[1]++;
 		}
@@ -252,7 +260,7 @@ float calcReward(int* board, int black_put_number, int white_put_number, int eff
 	}
 
 	if (black_put_number == 0 || black_put_number == 7 || black_put_number == 56 || black_put_number == 63) reward += 0.2;
-	//HACK:Œ©‚Ã‚ç‚¢
+	//HACK:è¦‹ã¥ã‚‰ã„
 	else if (black_put_number == 1 || black_put_number == 8 || black_put_number == 9 || black_put_number == 6 || black_put_number == 14 || black_put_number == 15 || black_put_number == 48
 		|| black_put_number == 49 || black_put_number == 57 || black_put_number == 54 || black_put_number == 55 || black_put_number == 62) reward -= 0.1;
 
@@ -279,11 +287,11 @@ int choiceRamdomPutValue(enable_put enable_array, int count) {
 
 /************************
 
-‡“`”ÀŒvZ
+é †ä¼æ¬è¨ˆç®—
 
 ************************/
 
-//OPTIMIZE:‚‘¬‰»‰Â”\
+//OPTIMIZE:é«˜é€ŸåŒ–å¯èƒ½
 void calcForwardMiddleClass(int* input, float* output, float* weight, int input_dim, int output_dim) {
 	for (int i = 0; i < output_dim; i++) output[i] = 0;
 
@@ -292,7 +300,7 @@ void calcForwardMiddleClass(int* input, float* output, float* weight, int input_
 	for (int k = 0; k < output_dim; k++) output[k] = tanhf(output[k]);
 }
 
-//OPTIMIZE:‚‘¬‰»‰Â”\
+//OPTIMIZE:é«˜é€ŸåŒ–å¯èƒ½
 void calcForwardFullcombined(float* input, float* output, float* weight, int input_dim, int output_dim) {
 	for (int i = 0; i < output_dim; i++) output[i] = 0;
 
@@ -311,13 +319,13 @@ void calcForwardpropagation(int* input, float* output, float* weight_middle, flo
 
 /************************
 
-‡“`”ÀŒvZI‚í‚è
+é †ä¼æ¬è¨ˆç®—çµ‚ã‚ã‚Š
 
 ************************/
 
 /************************
 
-Œë·‹t“`”À
+èª¤å·®é€†ä¼æ¬
 
 ************************/
 
@@ -362,7 +370,7 @@ void updateWeight(float* middle_weight, float* final_weight, float* middle_delta
 		//if (i == output_dim * middle_dim - 1) printf("%lf\n", final_delta[i]);
 	}
 }
-void doTrainQNetwork(experience_reply* reply, float* middle_weight, float* final_weight, int input_dim, int middle_dim, int output_dim) {
+void doTrainQNetwork(history* history, experience_reply* reply, float* middle_weight, float* final_weight, int input_dim, int middle_dim, int output_dim) {
 	experience_reply batch[BATCH_SIZE];
 	float target_middle_weight[MIDDLE_DIM * INPUT_DIM], target_final_weight[MIDDLE_DIM * OUTPUT_DIM];
 	float target_q_value[OUTPUT_DIM], q_value[OUTPUT_DIM], diff_q_value[OUTPUT_DIM];
@@ -385,7 +393,10 @@ void doTrainQNetwork(experience_reply* reply, float* middle_weight, float* final
 			}
 			else
 				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;//diff_q_value[i] = 0;
+			if (batch_index % 20 == 0)history[history_index].error += diff_q_value[i] / OUTPUT_DIM;
 		}
+		if (batch_index % 20 == 0)history[history_index].epoch = history_index;
+		if (batch_index % 20 == 0)history_index++;
 		calcErrorBackPropagation(batch[batch_index].state, diff_q_value, middle_output, final_weight, final_delta, middle_delta, input_dim, output_dim, middle_dim);
 		updateWeight(middle_weight, final_weight, middle_delta, final_delta, 0.1, input_dim, middle_dim, output_dim);
 	}
@@ -393,7 +404,46 @@ void doTrainQNetwork(experience_reply* reply, float* middle_weight, float* final
 
 /************************
 
-Œë·‹t“`”ÀI‚í‚è
+èª¤å·®é€†ä¼æ¬çµ‚ã‚ã‚Š
+
+************************/
+
+/************************
+
+å­¦ç¿’ãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿ã®ä¿å­˜
+
+************************/
+
+void saveHistory(history* history) {
+	FILE* fp;
+	const char* fname = SAVE_HISTORY_NAME;
+	errno_t error;
+
+	int remove(*fname);
+
+	error = fopen_s(&fp, fname, "w");
+	if (fp == NULL) {
+		printf("file open error Â¥n");
+	}
+	else {
+
+		for (int i = 0; i < history_index; i++) {
+			std::cout << history[i].epoch << "," << history[i].error << "\n";
+			fprintf(fp, "%d,%f\n", history[i].epoch, abs(history[i].error));
+		}
+
+		fclose(fp);
+
+		printf("%sãƒ•ã‚¡ã‚¤ãƒ«æ›¸ãè¾¼ã¿ãŒçµ‚ã‚ã‚Šã¾ã—ãŸÂ¥n", fname);
+
+	}
+
+}
+
+
+/************************
+
+å­¦ç¿’ãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿ã®ä¿å­˜çµ‚ã‚ã‚Š
 
 ************************/
 
@@ -416,31 +466,32 @@ void runSetBoard(int* board, array_with_index *q_value_with_index, int current_c
 }
 
 void printBoard(int* board) {
-	puts(" ‚P‚Q‚R‚S‚T‚U‚V‚W");
+	puts(" ï¼‘ï¼’ï¼“ï¼”ï¼•ï¼–ï¼—ï¼˜");
 	for (int i = 0; i < BOARD_SIZE; i++) {
 		printf("%d", i);
 		for (int j = 0; j < BOARD_SIZE; j++) {
-			if (board[i * BOARD_SIZE + j] == -1) printf("œ");
-			else if (board[i * BOARD_SIZE + j] == 1) printf("›");
-			else printf("[");
+			if (board[i * BOARD_SIZE + j] == -1) printf("â—");
+			else if (board[i * BOARD_SIZE + j] == 1) printf("â—‹");
+			else printf("ãƒ¼");
 		}
 		puts("");
 	}
 }
 
 void printEnablePut(enable_put enable_array) {
-	for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) if(enable_array.enable[i] == 1) printf("%dA", i);
+	for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) if(enable_array.enable[i] == 1) printf("%dã€", i);
 	puts("");
 }
 
 void printQValue(array_with_index* index, int count) {
-	for (int i = 0;i < count; i++) printf("%dF%lf\n", index[i].index, index[i].value);
+	for (int i = 0;i < count; i++) printf("%dï¼š%lf\n", index[i].index, index[i].value);
 }
 
 int main() {
-	int board[BOARD_SIZE * BOARD_SIZE] = { 0 }; //‹ó‚«ƒ}ƒX:0A”’:-1A•F1
+	int board[BOARD_SIZE * BOARD_SIZE] = { 0 }; //ç©ºããƒã‚¹:0ã€ç™½:-1ã€é»’ï¼š1
 	experience_reply memory[MEMORY_SIZE];
 	float middle_weight[INPUT_DIM * MIDDLE_DIM], combined_weight[MIDDLE_DIM * OUTPUT_DIM];
+	history history[BATCH_SIZE * EPISODE / EPISODE_INTERVAL] = { 0 };
 	setUniformDistributionToArray(middle_weight, INPUT_DIM * MIDDLE_DIM, INPUT_DIM);
 	setUniformDistributionToArray(combined_weight, MIDDLE_DIM * OUTPUT_DIM, MIDDLE_DIM);
 
@@ -452,7 +503,7 @@ int main() {
 
 	for (int episode = 0; episode < EPISODE; episode++) {
 		if (episode % EPISODE_INTERVAL == 0 && episode != 0) {
-			doTrainQNetwork(memory, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
+			doTrainQNetwork(history, memory, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
 			resetEpisode(memory);
 		}
 		int prev_color = 0, now_color = 0, black_put_value = 999, white_put_value = 999;
@@ -472,7 +523,7 @@ int main() {
 			}
 			else pass = 0;
 
-			createState(board, state); //‚±‚±‚ğ‚¢‚¶‚é
+			createState(board, state); //ã“ã“ã‚’ã„ã˜ã‚‹
 
 			if (current_color == 1) {
 				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 35, episode);
@@ -505,6 +556,8 @@ int main() {
 			//printBoard(board);
 		}
 	}
+
+	saveHistory(history);
 	int win = 0;
 
 	for (int index = 0;index < 1000; index++) {
@@ -524,7 +577,7 @@ int main() {
 			}
 			else pass = 0;
 
-			createState(board, state); //‚±‚±‚ğ‚¢‚¶‚é
+			createState(board, state); //ã“ã“ã‚’ã„ã˜ã‚‹
 
 			if (current_color == 1) {
 				calcForwardpropagation(state, q_value, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
