@@ -5,13 +5,13 @@
 #include <iostream>
 
 #define BOARD_SIZE 8 //盤面の一辺の数
-#define EPISODE 20000 //エピソード数
+#define EPISODE 5000 //エピソード数
 #define MEMORY_SIZE 800 //一度に保存するExperience Replyの数
 #define BATCH_SIZE 400 //バッチサイズ
 #define EPISODE_INTERVAL 80 //学習を行う頻度
 
 #define INPUT_DIM 5 //入力次元（状態数）
-#define MIDDLE_DIM 32 //隠れ層の次元
+#define MIDDLE_DIM 64 //隠れ層の次元
 #define OUTPUT_DIM 64 //出力次元
 
 typedef struct {
@@ -43,6 +43,7 @@ typedef struct {
 } history;
 int history_index = 0;
 #define SAVE_HISTORY_NAME "C:/Users/metar/Desktop/history.csv";
+#define SAVE_EPOCH_INTERVAL 100
 
 //進行方向
 const coordinate direction[8]{
@@ -388,15 +389,15 @@ void doTrainQNetwork(history* history, experience_reply* reply, float* middle_we
 		qsort(q_value_with_index, OUTPUT_DIM, sizeof(array_with_index), cmpDescValue);
 
 		for (int i = 0; i < OUTPUT_DIM; i++) {
-			if (i == q_value_with_index[0].index) {
-				diff_q_value[i] = q_value[i] - batch[batch_index].reward * 0.99 * q_value_with_index[0].value;
+			if (i == batch[batch_index].action) {
+				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;
+				if (batch_index % SAVE_EPOCH_INTERVAL == 0)history[history_index].error = diff_q_value[i];
 			}
 			else
-				diff_q_value[i] = q_value[i] - batch[batch_index].reward * 0.99 * q_value_with_index[0].value;//diff_q_value[i] = 0;
-			if (batch_index % 20 == 0)history[history_index].error += diff_q_value[i] / OUTPUT_DIM;
+				diff_q_value[i] = 0;
 		}
-		if (batch_index % 20 == 0)history[history_index].epoch = history_index;
-		if (batch_index % 20 == 0)history_index++;
+		if (batch_index % SAVE_EPOCH_INTERVAL == 0)history[history_index].epoch = history_index;
+		if (batch_index % SAVE_EPOCH_INTERVAL == 0)history_index++;
 		calcErrorBackPropagation(batch[batch_index].state, diff_q_value, middle_output, final_weight, final_delta, middle_delta, input_dim, output_dim, middle_dim);
 		updateWeight(middle_weight, final_weight, middle_delta, final_delta, 0.1, input_dim, middle_dim, output_dim);
 	}
@@ -434,7 +435,7 @@ void saveHistory(history* history) {
 
 		fclose(fp);
 
-		printf("%sファイル書き込みが終わりました¥n", fname);
+		printf("%sファイル書き込みが終わりました\n", fname);
 
 	}
 
@@ -491,7 +492,7 @@ int main() {
 	int board[BOARD_SIZE * BOARD_SIZE] = { 0 }; //空きマス:0、白:-1、黒：1
 	experience_reply memory[MEMORY_SIZE];
 	float middle_weight[INPUT_DIM * MIDDLE_DIM], combined_weight[MIDDLE_DIM * OUTPUT_DIM];
-	history history[BATCH_SIZE * EPISODE / EPISODE_INTERVAL] = { 0 };
+	history history[BATCH_SIZE * EPISODE / EPISODE_INTERVAL / SAVE_EPOCH_INTERVAL] = { 0 };
 	setUniformDistributionToArray(middle_weight, INPUT_DIM * MIDDLE_DIM, INPUT_DIM);
 	setUniformDistributionToArray(combined_weight, MIDDLE_DIM * OUTPUT_DIM, MIDDLE_DIM);
 
@@ -502,6 +503,7 @@ int main() {
 	setIndex(q_value_with_index, q_value, OUTPUT_DIM);
 
 	for (int episode = 0; episode < EPISODE; episode++) {
+		if (episode % (EPISODE / 10) == 0)std::cout << "・";
 		if (episode % EPISODE_INTERVAL == 0 && episode != 0) {
 			doTrainQNetwork(history, memory, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
 			resetEpisode(memory);
@@ -526,7 +528,7 @@ int main() {
 			createState(board, state); //ここをいじる
 
 			if (current_color == 1) {
-				const int action_term = selectEpisilonOrGreedy(0.9, 0.05, 35, episode);
+				const int action_term = selectEpisilonOrGreedy(0.9, 0.1, 35, episode);
 				if (action_term == 2) put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, 0));
 				else {
 					calcForwardpropagation(state, q_value, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
