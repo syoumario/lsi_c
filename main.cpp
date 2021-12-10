@@ -42,7 +42,9 @@ typedef struct {
 	int epoch;
 } history;
 int history_index = 0;
-#define SAVE_HISTORY_NAME "C:/Users/metar/Desktop/history.csv";
+#define SAVE_HISTORY_NAME "history.csv";
+#define SAVE_MIDDLE_WEIGHT_NAME "middle_weight.csv"
+#define SAVE_FINAL_WEIGHT_NAME "final_weight.csv"
 #define SAVE_EPOCH_INTERVAL 100
 
 //進行方向
@@ -441,6 +443,19 @@ void saveHistory(history* history) {
 
 }
 
+void saveWeight(float* weight, int length, const char* file_name) {
+	FILE* fp;
+	fopen_s(&fp, file_name, "w");
+	
+	if (fp == NULL) puts("ファイル開けません");
+	else {
+		for (int i = 0; i < length; i++) {
+			fprintf(fp, "%lf\n", weight[i]);
+		}
+	}
+	fclose(fp);
+}
+
 
 /************************
 
@@ -560,6 +575,9 @@ int main() {
 	}
 
 	saveHistory(history);
+	saveWeight(middle_weight, INPUT_DIM * MIDDLE_DIM, SAVE_MIDDLE_WEIGHT_NAME);
+	saveWeight(combined_weight, MIDDLE_DIM * OUTPUT_DIM, SAVE_FINAL_WEIGHT_NAME);
+
 	int win = 0;
 
 	for (int index = 0;index < 1000; index++) {
