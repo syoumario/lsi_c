@@ -59,6 +59,17 @@ const coordinate direction[8]{
 	{0,-1},
 };
 
+const float board_score[64] = {
+	0.3,-0.12,0,-0.01,-0.01,0,-0.12,0.3,
+	-0.12,-0.15,-0.03,-0.03,-0.03,-0.03,-0.15,-0.12,
+	0,-0.03,0,-0.01,-0.01,0,-0.03,0,
+	-0.01,-0.03,-0.01,-0.01,-0.01,-0.01,-0.03,-0.01,
+	-0.01,-0.03,-0.01,-0.01,-0.01,-0.01,-0.03,-0.01,
+	0,-0.03,0,-0.01,-0.01,0,-0.03,0,
+	-0.12,-0.15,-0.03,-0.03,-0.03,-0.03,-0.15,-0.12,
+	0.3,-0.12,0,-0.01,-0.01,0,-0.12,0.3
+};
+
 //	q値(降順)
 int cmpDescValue(const void* n1, const void* n2)
 {
@@ -254,18 +265,22 @@ float calcReward(int* board, int black_put_number, int white_put_number, int eff
 		else white++;
 	}
 	if (effort == BOARD_SIZE * BOARD_SIZE - 4) {
-		if (black > white) reward++;
-		else if (black <= white) reward--;
+		if (black > white) reward += 10;
+		else if (black <= white) reward -= 10;
 	}
 	else if(white == 0 || black == 0){
-		if (white == 0) reward++;
-		if (black == 0) reward--;
+		if (white == 0) reward += 10;
+		if (black == 0) reward -= 10;
 	}
 
-	if (black_put_number == 0 || black_put_number == 7 || black_put_number == 56 || black_put_number == 63) reward += 0.2;
-	//HACK:見づらい
-	else if (black_put_number == 1 || black_put_number == 8 || black_put_number == 9 || black_put_number == 6 || black_put_number == 14 || black_put_number == 15 || black_put_number == 48
-		|| black_put_number == 49 || black_put_number == 57 || black_put_number == 54 || black_put_number == 55 || black_put_number == 62) reward -= 0.1;
+	//if (black_put_number == 0 || black_put_number == 7 || black_put_number == 56 || black_put_number == 63) reward += 0.2;
+	////HACK:見づらい
+	//else if (black_put_number == 1 || black_put_number == 8 || black_put_number == 9 || black_put_number == 6 || black_put_number == 14 || black_put_number == 15 || black_put_number == 48
+	//	|| black_put_number == 49 || black_put_number == 57 || black_put_number == 54 || black_put_number == 55 || black_put_number == 62) reward -= 0.1;
+
+	for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+		reward += board[i] * board_score[i];
+	}
 
 	return reward;
 }
@@ -450,7 +465,7 @@ void saveWeight(float* weight, int length, const char* file_name) {
 	if (fp == NULL) puts("ファイル開けません");
 	else {
 		for (int i = 0; i < length; i++) {
-			fprintf(fp, "%lf\n", weight[i]);
+			fprintf(fp, "%lf,\n", weight[i]);
 		}
 	}
 	fclose(fp);
@@ -610,13 +625,15 @@ int main() {
 			}
 			putBoard(board, put_value, current_color);
 			//printBoard(board);
-			if (calcReward(board, 999, 999, effort) >= 0.9) {
-				win++;
-			}
 			effort++;
 
 			current_color *= -1;
 		}
+		int tmp_stone_count = 0;
+		for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+			tmp_stone_count += board[i];
+		}
+		if (tmp_stone_count > 0) win++;
 	}
 	printf("%d\n", win);
 	return 0;
