@@ -5,7 +5,7 @@
 #include <iostream>
 
 #define BOARD_SIZE 8 //盤面の一辺の数
-#define EPISODE 5000 //エピソード数
+#define EPISODE 20000 //エピソード数
 #define MEMORY_SIZE 800 //一度に保存するExperience Replyの数
 #define BATCH_SIZE 400 //バッチサイズ
 #define EPISODE_INTERVAL 80 //学習を行う頻度
@@ -407,7 +407,7 @@ void doTrainQNetwork(history* history, experience_reply* reply, float* middle_we
 
 		for (int i = 0; i < OUTPUT_DIM; i++) {
 			if (i == batch[batch_index].action) {
-				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;
+				diff_q_value[i] = - q_value[i] + batch[batch_index].reward + 0.99 * q_value_with_index[0].value;
 				if (batch_index % SAVE_EPOCH_INTERVAL == 0)history[history_index].error = diff_q_value[i];
 			}
 			else
@@ -416,7 +416,7 @@ void doTrainQNetwork(history* history, experience_reply* reply, float* middle_we
 		if (batch_index % SAVE_EPOCH_INTERVAL == 0)history[history_index].epoch = history_index;
 		if (batch_index % SAVE_EPOCH_INTERVAL == 0)history_index++;
 		calcErrorBackPropagation(batch[batch_index].state, diff_q_value, middle_output, final_weight, final_delta, middle_delta, input_dim, output_dim, middle_dim);
-		updateWeight(middle_weight, final_weight, middle_delta, final_delta, 0.1, input_dim, middle_dim, output_dim);
+		updateWeight(middle_weight, final_weight, middle_delta, final_delta, 0.25, input_dim, middle_dim, output_dim);
 	}
 }
 
