@@ -5,10 +5,11 @@
 #include <iostream>
 
 #define BOARD_SIZE 8 //盤面の一辺の数
-#define EPISODE 5000 //エピソード数
+#define EPISODE 20000 //エピソード数
 #define MEMORY_SIZE 800 //一度に保存するExperience Replyの数
 #define BATCH_SIZE 400 //バッチサイズ
 #define EPISODE_INTERVAL 80 //学習を行う頻度
+#define MATCH_INTERVAL 500 //学習の合間に試合を行う頻度
 
 #define INPUT_DIM 5 //入力次元（状態数）
 #define MIDDLE_DIM 64 //隠れ層の次元
@@ -45,6 +46,7 @@ int history_index = 0;
 #define SAVE_HISTORY_NAME "history.csv";
 #define SAVE_MIDDLE_WEIGHT_NAME "middle_weight.csv"
 #define SAVE_FINAL_WEIGHT_NAME "final_weight.csv"
+#define SAVE_PROGRESS_RATE_NAME "progress_rate.csv"
 #define SAVE_EPOCH_INTERVAL 100
 
 //進行方向
@@ -57,6 +59,17 @@ const coordinate direction[8]{
 	{-1,0},
 	{-1,-1},
 	{0,-1},
+};
+
+const float board_score[64] = {
+	0.3,-0.12,0,-0.01,-0.01,0,-0.12,0.3,
+	-0.12,-0.15,-0.03,-0.03,-0.03,-0.03,-0.15,-0.12,
+	0,-0.03,0,-0.01,-0.01,0,-0.03,0,
+	-0.01,-0.03,-0.01,-0.01,-0.01,-0.01,-0.03,-0.01,
+	-0.01,-0.03,-0.01,-0.01,-0.01,-0.01,-0.03,-0.01,
+	0,-0.03,0,-0.01,-0.01,0,-0.03,0,
+	-0.12,-0.15,-0.03,-0.03,-0.03,-0.03,-0.15,-0.12,
+	0.3,-0.12,0,-0.01,-0.01,0,-0.12,0.3
 };
 
 //	q値(降順)
@@ -254,18 +267,22 @@ float calcReward(int* board, int black_put_number, int white_put_number, int eff
 		else white++;
 	}
 	if (effort == BOARD_SIZE * BOARD_SIZE - 4) {
-		if (black > white) reward++;
-		else if (black <= white) reward--;
+		if (black > white) reward += 10;
+		else if (black <= white) reward -= 10;
 	}
 	else if(white == 0 || black == 0){
-		if (white == 0) reward++;
-		if (black == 0) reward--;
+		if (white == 0) reward += 10;
+		if (black == 0) reward -= 10;
 	}
 
-	if (black_put_number == 0 || black_put_number == 7 || black_put_number == 56 || black_put_number == 63) reward += 0.2;
-	//HACK:見づらい
-	else if (black_put_number == 1 || black_put_number == 8 || black_put_number == 9 || black_put_number == 6 || black_put_number == 14 || black_put_number == 15 || black_put_number == 48
-		|| black_put_number == 49 || black_put_number == 57 || black_put_number == 54 || black_put_number == 55 || black_put_number == 62) reward -= 0.1;
+	//if (black_put_number == 0 || black_put_number == 7 || black_put_number == 56 || black_put_number == 63) reward += 0.2;
+	////HACK:見づらい
+	//else if (black_put_number == 1 || black_put_number == 8 || black_put_number == 9 || black_put_number == 6 || black_put_number == 14 || black_put_number == 15 || black_put_number == 48
+	//	|| black_put_number == 49 || black_put_number == 57 || black_put_number == 54 || black_put_number == 55 || black_put_number == 62) reward -= 0.1;
+
+	for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+		reward += board[i] * board_score[i];
+	}
 
 	return reward;
 }
@@ -392,7 +409,7 @@ void doTrainQNetwork(history* history, experience_reply* reply, float* middle_we
 
 		for (int i = 0; i < OUTPUT_DIM; i++) {
 			if (i == batch[batch_index].action) {
-				diff_q_value[i] = q_value[i] - batch[batch_index].reward + 0.99 * q_value_with_index[0].value;
+				diff_q_value[i] = - q_value[i] + batch[batch_index].reward + 0.99 * q_value_with_index[0].value;
 				if (batch_index % SAVE_EPOCH_INTERVAL == 0)history[history_index].error = diff_q_value[i];
 			}
 			else
@@ -401,7 +418,7 @@ void doTrainQNetwork(history* history, experience_reply* reply, float* middle_we
 		if (batch_index % SAVE_EPOCH_INTERVAL == 0)history[history_index].epoch = history_index;
 		if (batch_index % SAVE_EPOCH_INTERVAL == 0)history_index++;
 		calcErrorBackPropagation(batch[batch_index].state, diff_q_value, middle_output, final_weight, final_delta, middle_delta, input_dim, output_dim, middle_dim);
-		updateWeight(middle_weight, final_weight, middle_delta, final_delta, 0.1, input_dim, middle_dim, output_dim);
+		updateWeight(middle_weight, final_weight, middle_delta, final_delta, 0.25, input_dim, middle_dim, output_dim);
 	}
 }
 
@@ -450,7 +467,7 @@ void saveWeight(float* weight, int length, const char* file_name) {
 	if (fp == NULL) puts("ファイル開けません");
 	else {
 		for (int i = 0; i < length; i++) {
-			fprintf(fp, "%lf\n", weight[i]);
+			fprintf(fp, "%lf,\n", weight[i]);
 		}
 	}
 	fclose(fp);
@@ -503,6 +520,68 @@ void printQValue(array_with_index* index, int count) {
 	for (int i = 0;i < count; i++) printf("%d：%lf\n", index[i].index, index[i].value);
 }
 
+float playOthelloRate(int* board, int play_count, float* middle_weight, float* combined_weight) {
+	int win = 0;
+	array_with_index q_value_with_index[OUTPUT_DIM];
+	float q_value[OUTPUT_DIM] = { 0 };
+
+	for (int index = 0;index < play_count; index++) {
+		resetBoard(board);
+		int effort = 1;
+		int current_color = 1;
+		int pass = 0;
+		while (effort <= 60) {
+			if (pass == 2)break;
+			int put_value, state[INPUT_DIM];
+			const enable_put enable_array = checkPutCapability(board, current_color);
+
+			if (enable_array.count == 0) {
+				current_color *= -1;
+				pass++;
+				continue;
+			}
+			else pass = 0;
+
+			createState(board, state); //ここをいじる
+
+			if (current_color == 1) {
+				calcForwardpropagation(state, q_value, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
+				setIndex(q_value_with_index, q_value, OUTPUT_DIM);
+				qsort(q_value_with_index, OUTPUT_DIM, sizeof(array_with_index), cmpDescValue);
+				put_value = choicePutValue(enable_array, q_value_with_index);
+			}
+			else {
+				put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, index));
+			}
+			putBoard(board, put_value, current_color);
+			//printBoard(board);
+			effort++;
+
+			current_color *= -1;
+		}
+		int tmp_stone_count = 0;
+		for (int i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+			tmp_stone_count += board[i];
+		}
+		if (tmp_stone_count > 0) win++;
+	}
+
+	return (float)win / play_count;
+}
+
+void saveProgressRate(array_with_index *input, int length, const char* file_name) {
+	FILE* fp;
+	fopen_s(&fp, file_name, "w");
+
+	if (fp == NULL) puts("ファイル開けません");
+	else {
+		for (int i = 0; i < length; i++) {
+			fprintf(fp, "%d,%lf,\n", input[i].index, input[i].value);
+		}
+	}
+	fclose(fp);
+}
+
 int main() {
 	int board[BOARD_SIZE * BOARD_SIZE] = { 0 }; //空きマス:0、白:-1、黒：1
 	experience_reply memory[MEMORY_SIZE];
@@ -514,6 +593,8 @@ int main() {
 	int effort = 1, current_color=1, memory_index = 0, pass=0;
 	resetBoard(board);
 	array_with_index q_value_with_index[OUTPUT_DIM];
+	array_with_index progress_rate[EPISODE / MATCH_INTERVAL];
+	int progress_index = 0;
 	float q_value[OUTPUT_DIM] = { 0 };
 	setIndex(q_value_with_index, q_value, OUTPUT_DIM);
 
@@ -524,6 +605,11 @@ int main() {
 			resetEpisode(memory);
 		}
 		int prev_color = 0, now_color = 0, black_put_value = 999, white_put_value = 999;
+		if (episode % MATCH_INTERVAL == 0) {
+			progress_rate[progress_index].index = episode;
+			progress_rate[progress_index].value = playOthelloRate(board, 500, middle_weight, combined_weight);
+			progress_index++;
+		}
 		resetBoard(board);
 		effort = 1;
 		current_color = 1;
@@ -577,47 +663,7 @@ int main() {
 	saveHistory(history);
 	saveWeight(middle_weight, INPUT_DIM * MIDDLE_DIM, SAVE_MIDDLE_WEIGHT_NAME);
 	saveWeight(combined_weight, MIDDLE_DIM * OUTPUT_DIM, SAVE_FINAL_WEIGHT_NAME);
+	saveProgressRate(progress_rate, EPISODE / MATCH_INTERVAL, SAVE_PROGRESS_RATE_NAME);
 
-	int win = 0;
-
-	for (int index = 0;index < 1000; index++) {
-		resetBoard(board);
-		effort = 1;
-		current_color = 1;
-		pass = 0;
-		while (effort <= 60) {
-			if (pass == 2)break;
-			int put_value, state[INPUT_DIM];
-			const enable_put enable_array = checkPutCapability(board, current_color);
-
-			if (enable_array.count == 0) {
-				current_color *= -1;
-				pass++;
-				continue;
-			}
-			else pass = 0;
-
-			createState(board, state); //ここをいじる
-
-			if (current_color == 1) {
-				calcForwardpropagation(state, q_value, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
-				setIndex(q_value_with_index, q_value, OUTPUT_DIM);
-				qsort(q_value_with_index, OUTPUT_DIM, sizeof(array_with_index), cmpDescValue);
-				put_value = choicePutValue(enable_array, q_value_with_index);
-			}
-			else {
-				put_value = choiceRamdomPutValue(enable_array, setRandomIndex(1, enable_array.count, index));
-			}
-			putBoard(board, put_value, current_color);
-			//printBoard(board);
-			if (calcReward(board, 999, 999, effort) >= 0.9) {
-				win++;
-			}
-			effort++;
-
-			current_color *= -1;
-		}
-	}
-	printf("%d\n", win);
 	return 0;
 }
