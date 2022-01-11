@@ -595,7 +595,7 @@ int main() {
 	array_with_index q_value_with_index[OUTPUT_DIM];
 	array_with_index progress_rate[EPISODE / MATCH_INTERVAL];
 	int progress_index = 0;
-	float q_value[OUTPUT_DIM] = { 0 };
+	float q_value[OUTPUT_DIM] = { 0 }, max_rate = 0.0;
 	setIndex(q_value_with_index, q_value, OUTPUT_DIM);
 
 	for (int episode = 0; episode < EPISODE; episode++) {
@@ -608,6 +608,12 @@ int main() {
 		if (episode % MATCH_INTERVAL == 0) {
 			progress_rate[progress_index].index = episode;
 			progress_rate[progress_index].value = playOthelloRate(board, 500, middle_weight, combined_weight);
+			if (progress_rate[progress_index].value > max_rate) {
+				max_rate = progress_rate[progress_index].value;
+				saveWeight(middle_weight, INPUT_DIM * MIDDLE_DIM, SAVE_MIDDLE_WEIGHT_NAME);
+				saveWeight(combined_weight, MIDDLE_DIM * OUTPUT_DIM, SAVE_FINAL_WEIGHT_NAME);
+				printf("重み保存 %d: %lf\n", episode, progress_rate[progress_index].value);
+			}
 			progress_index++;
 		}
 		resetBoard(board);
@@ -661,8 +667,8 @@ int main() {
 	}
 
 	saveHistory(history);
-	saveWeight(middle_weight, INPUT_DIM * MIDDLE_DIM, SAVE_MIDDLE_WEIGHT_NAME);
-	saveWeight(combined_weight, MIDDLE_DIM * OUTPUT_DIM, SAVE_FINAL_WEIGHT_NAME);
+	/*saveWeight(middle_weight, INPUT_DIM * MIDDLE_DIM, SAVE_MIDDLE_WEIGHT_NAME);
+	saveWeight(combined_weight, MIDDLE_DIM * OUTPUT_DIM, SAVE_FINAL_WEIGHT_NAME);*/
 	saveProgressRate(progress_rate, EPISODE / MATCH_INTERVAL, SAVE_PROGRESS_RATE_NAME);
 
 	return 0;
