@@ -3,11 +3,15 @@
 #include<math.h>
 #include <time.h>
 #include <iostream>
+#include <tkusbfx3.h>
+#include <windows.h>
+#pragma comment(lib, "tkusbfx3.lib")
+using namespace std;
 
 #define BOARD_SIZE 8 //盤面の一辺の数
 #define EPISODE 20000 //エピソード数
 #define MEMORY_SIZE 800 //一度に保存するExperience Replyの数
-#define BATCH_SIZE 400 //バッチサイズ
+#define BATCH_SIZE 512 //バッチサイズ
 #define EPISODE_INTERVAL 80 //学習を行う頻度
 #define MATCH_INTERVAL 500 //学習の合間に試合を行う頻度
 
@@ -390,6 +394,7 @@ void updateWeight(float* middle_weight, float* final_weight, float* middle_delta
 		//if (i == output_dim * middle_dim - 1) printf("%lf\n", final_delta[i]);
 	}
 }
+
 void doTrainQNetwork(history* history, experience_reply* reply, float* middle_weight, float* final_weight, int input_dim, int middle_dim, int output_dim) {
 	experience_reply batch[BATCH_SIZE];
 	float target_middle_weight[MIDDLE_DIM * INPUT_DIM], target_final_weight[MIDDLE_DIM * OUTPUT_DIM];
@@ -425,6 +430,506 @@ void doTrainQNetwork(history* history, experience_reply* reply, float* middle_we
 /************************
 
 誤差逆伝搬終わり
+
+************************/
+
+/************************
+
+Artix7で学習
+
+************************/
+
+bool UsbOpen()	//デバイスUSBのオープン関数
+{
+	char DeviceName[100];
+	unsigned short pid, vid;
+
+	for (int timeout = 0; timeout < 3; timeout++)
+	{
+		bool status = TKUSBFX3Open(0, &vid, &pid, DeviceName, sizeof(DeviceName));
+
+		if (status)
+		{
+			//printf("USB open success. VID=%04x PID=%04x DeviceName=\"%s\"\n", vid, pid, DeviceName);
+		}
+		else
+		{
+			printf("USB open failed.\n");
+			return false;
+		}
+
+		if ((vid == 0x2129) && (pid == 0x0520))
+		{
+			printf("NP1053(特電FX3ボード)を発見しました\n");
+			return true;
+		}
+		else if ((vid == 0x2129) && (pid == 0x0640))
+		{
+			//printf("NP1064(特電Artix-7ボード)を発見しました\n");
+			return true;
+		}
+		else
+		{
+			char ErrorReason[100];
+			printf("異なるVID,PIDのデバイスが見つかったので、ファームウェアを書き込みます。\n");
+			if (TKUSBFX3WriteToRAM("SlaveFifoNP1064.img", ErrorReason, 100))
+			{
+				printf("ファームウェアを書き込みました\n");
+				Sleep(1000);
+			}
+			else
+			{
+				printf("ファームウェアの転送に失敗しました 理由:%s\n", ErrorReason);
+				return false;
+			}
+		}
+	}
+	return false;
+}
+
+void trans_2bit16array_from_double(double val_t, int out[16]) {
+	double val;
+	int minusflag = 0;
+	if (val_t < 0) {
+		val = val_t * (-1);
+		minusflag = 1;
+	}
+	else {
+		val = val_t;
+	}
+	int x_i = int(val);
+	double x_f = val - x_i;
+
+	out[0] = 0;
+
+	//整数部を5bitに変換
+	for (int i = 0; i < 5; i++) {
+		out[5 - i] = x_i % 2;
+		x_i /= 2;
+	}
+
+	//小数部を10bitに変換
+	for (int i = 0; i < 10; i++) {
+		out[6 + i] = int(x_f * 2);
+		x_f = x_f * 2 - out[6 + i];
+	}
+
+	//補数をとる
+	if (minusflag == 1) {
+		//ビットの反転
+		for (int i = 0; i < 16; i++) {
+			if (out[i] == 1) out[i] = 0;
+			else out[i] = 1;
+		}
+		//最下位ビットに+1
+		if (out[15] == 0) out[15] = 1;
+		else {
+			out[15] = 0;
+			for (int i = 0; i < 15; i++) {
+				if (out[14 - i] == 0) {
+					out[14 - i] = 1;
+					break;
+				}
+				else out[14 - i] = 0;
+			}
+		}
+	}
+
+}
+
+void trans_2bit8array_from_unsignedchar(unsigned char val_t, int out[8]) {
+	unsigned char val = val_t;
+
+	//正数を8bitに変換
+	for (int i = 0; i < 8; i++) {
+		out[7 - i] = val % 2;
+		val /= 2;
+	}
+
+}
+
+double trans_double_from_2bit16array(int in[16]) {
+	double val = 0;
+	int x[16];
+
+	if (in[0] == 0) {
+		for (int i = 0; i < 15; i++) {
+			val += in[15 - i] * pow(2, (i - 10));
+		}
+		return val;
+	}
+	else {
+		//ビットの反転
+		for (int i = 0; i < 16; i++) {
+			if (in[i] == 1) x[i] = 0;
+			else x[i] = 1;
+		}
+		//最下位ビットに+1
+		if (x[15] == 0) x[15] = 1;
+		else {
+			x[15] = 0;
+			for (int i = 0; i < 15; i++) {
+				if (x[14 - i] == 0) {
+					x[14 - i] = 1;
+					break;
+				}
+				else x[14 - i] = 0;
+			}
+		}
+
+		for (int i = 0; i < 15; i++) {
+			val += x[15 - i] * pow(2, (i - 10));
+		}
+
+		val *= -1;
+
+		return val;
+
+	}
+}
+
+unsigned char trans_unsignedchar_from_8bitarray(int in[8]) {
+	unsigned char out;
+	int x = 0;
+	for (int i = 0; i < 8; i++) {
+		x += in[7 - i] * pow(2, i);
+	}
+	out = unsigned char(x);
+	return out;
+}
+
+void trans_state(int state[5], unsigned char out_state[10]) {
+
+	int val_16bit[16];
+	double val;
+
+	for (int i = 0; i < 5; i++) {
+		val = double(state[i]);
+
+		trans_2bit16array_from_double(val, val_16bit);
+
+		int val_8bit_up[8];
+		int val_8bit_under[8];
+
+		for (int i = 0; i < 8; i++) {
+			val_8bit_up[i] = val_16bit[i];
+		}
+		for (int i = 0; i < 8; i++) {
+			val_8bit_under[i] = val_16bit[i + 8];
+		}
+
+		unsigned char x_up = trans_unsignedchar_from_8bitarray(val_8bit_up);
+		unsigned char x_under = trans_unsignedchar_from_8bitarray(val_8bit_under);
+
+		out_state[2 * i] = x_under;
+		out_state[2 * i + 1] = x_up;
+	}
+
+}
+
+void trans_reward(double reward, unsigned char out_state[2]) {
+	int val_16bit[16];
+	double val;
+
+	val = double(reward);
+
+	trans_2bit16array_from_double(val, val_16bit);
+
+	int val_8bit_up[8];
+	int val_8bit_under[8];
+
+	for (int i = 0; i < 8; i++) {
+		val_8bit_up[i] = val_16bit[i];
+	}
+	for (int i = 0; i < 8; i++) {
+		val_8bit_under[i] = val_16bit[i + 8];
+	}
+
+	unsigned char x_up = trans_unsignedchar_from_8bitarray(val_8bit_up);
+	unsigned char x_under = trans_unsignedchar_from_8bitarray(val_8bit_under);
+
+	out_state[0] = x_under;
+	out_state[1] = x_up;
+
+}
+
+void trans_double_fromArtix222(unsigned char in[160], double out[80]) {
+	int val_16bit[16];
+	int val_8bit_up[8];
+	int val_8bit_under[8];
+	for (int i = 0; i < 80; i++) {
+		trans_2bit8array_from_unsignedchar(in[i * 2], val_8bit_under);
+		trans_2bit8array_from_unsignedchar(in[i * 2 + 1], val_8bit_up);
+
+		for (int i = 0; i < 8; i++) {
+			val_16bit[i] = val_8bit_up[i];
+			val_16bit[i + 8] = val_8bit_under[i];
+		}
+
+		out[i] = trans_double_from_2bit16array(val_16bit);
+
+	}
+}
+
+void trans_action(double reward, unsigned char out_state[2]) {
+	int val_16bit[16];
+	double val;
+
+	val = double(reward);
+
+	int minusflag = 0;
+
+	int x_i = int(val);
+
+	double x_f = val - x_i;
+
+	val_16bit[0] = 0;
+
+	//整数部を5bitに変換
+	for (int i = 0; i < 6; i++) {
+		val_16bit[6 - i] = x_i % 2;
+		x_i /= 2;
+	}
+
+	//小数部を10bitに変換
+	for (int i = 0; i < 9; i++) {
+		val_16bit[7 + i] = int(x_f * 2);
+		x_f = x_f * 2 - val_16bit[7 + i];
+	}
+
+	int val_8bit_up[8];
+	int val_8bit_under[8];
+
+	for (int i = 0; i < 8; i++) {
+		val_8bit_up[i] = val_16bit[i];
+	}
+	for (int i = 0; i < 8; i++) {
+		val_8bit_under[i] = val_16bit[i + 8];
+	}
+
+	unsigned char x_up = trans_unsignedchar_from_8bitarray(val_8bit_up);
+	unsigned char x_under = trans_unsignedchar_from_8bitarray(val_8bit_under);
+
+	out_state[0] = x_under;
+	out_state[1] = x_up;
+
+}
+
+void new_trans_middle_weight(float* midle_weight, unsigned char* out, int input_dim, int middle_dim) {
+
+	int val_16bit[16];
+	double val;
+	for (int i = 0; i < input_dim * middle_dim; i++) {
+		val = double(midle_weight[i]);
+
+		trans_2bit16array_from_double(val, val_16bit);
+
+		int val_8bit_up[8];
+		int val_8bit_under[8];
+
+		for (int i = 0; i < 8; i++) {
+			val_8bit_up[i] = val_16bit[i];
+		}
+		for (int i = 0; i < 8; i++) {
+			val_8bit_under[i] = val_16bit[i + 8];
+		}
+
+		unsigned char x_up = trans_unsignedchar_from_8bitarray(val_8bit_up);
+		unsigned char x_under = trans_unsignedchar_from_8bitarray(val_8bit_under);
+
+		out[i * 2] = x_under;
+		out[i * 2 + 1] = x_up;
+	}
+
+}
+
+void new_trans_final_weight(float* final_weight, unsigned char* out, int middle_dim, int final_dim) {
+
+	int val_16bit[16];
+	double val;
+	for (int i = 0; i < middle_dim * final_dim; i++) {
+		val = double(final_weight[i]);
+
+		trans_2bit16array_from_double(val, val_16bit);
+
+		int val_8bit_up[8];
+		int val_8bit_under[8];
+
+		for (int i = 0; i < 8; i++) {
+			val_8bit_up[i] = val_16bit[i];
+		}
+		for (int i = 0; i < 8; i++) {
+			val_8bit_under[i] = val_16bit[i + 8];
+		}
+
+		unsigned char x_up = trans_unsignedchar_from_8bitarray(val_8bit_up);
+		unsigned char x_under = trans_unsignedchar_from_8bitarray(val_8bit_under);
+
+		out[i * 2] = x_under;
+		out[i * 2 + 1] = x_up;
+	}
+
+}
+
+void sendData_doTrain(experience_reply* exp, float* midle_weight, float* final_weight, int input_dim, int middle_dim, int output_dim) {
+
+	const int DATASIZE = 320;
+	unsigned char X[DATASIZE] = { 0 };
+	const int inp = 5;
+	const int mid = 64;
+	const int out = 64;
+
+	unsigned char state[10];
+	unsigned char next_state[10];
+	//行動のみ、1-6-9最大値が35であるため
+	unsigned char act[2];
+	unsigned char reward[2];
+	unsigned char middle_weight_char[inp * mid * 2];
+	unsigned char final_weight_char[mid * out * 2];
+
+	new_trans_middle_weight(midle_weight, middle_weight_char, input_dim, middle_dim);
+	new_trans_final_weight(final_weight, final_weight_char, middle_dim, output_dim);
+
+	//開始.デバイスUSBのオープン
+	//printf("プログラム起動.デバイス接続を確認します\n\n");
+	if (UsbOpen()) {
+		//printf("デバイス発見完了.%d個のデバイスが発見されました\n\n", TKUSBFX3DeviceCount());
+		if (TKUSBFX3DeviceCount() != 1) {
+			printf("このプログラムは2個以上のデバイスに対応していません.よって終了します\n");
+		}
+	}
+	else {
+		printf("デバイスが発見できません.FPGAを接続してください\n");
+	}
+	int USB_R, USB_W;
+
+	//経験を送信：X[0] = 1.X[1] = .X[2] and X[3] = 未定.
+	for (int c = 0; c < 512; c++) {
+		trans_state(exp[c].state, state);
+		trans_state(exp[c].next_state, next_state);
+		trans_action(exp[c].action, act);
+		trans_reward(exp[c].reward, reward);
+
+
+		X[0] = 1;
+		X[1] = 0;
+
+		X[2] = 0;
+		X[3] = 0;
+
+		/* set data */
+		for (int i = 0; i < 10; i++) {
+			X[4 + i] = state[i];
+		}
+		for (int i = 0; i < 10; i++) {
+			X[4 + 10 + i] = next_state[i];
+		}
+		for (int i = 0; i < 2; i++) {
+			X[4 + 20 + i] = act[i];
+		}
+		for (int i = 0; i < 2; i++) {
+			X[4 + 22 + i] = reward[i];
+		}
+
+		if (c < 64) {
+			for (int i = 0; i < 10; i++) {
+				X[4 + 22 + 2 + i] = middle_weight_char[c * 10 + i];
+			}
+			for (int i = 0; i < 128; i++) {
+				X[4 + 22 + 2 + 10 + i] = final_weight_char[c * 128 + i];
+			}
+		}
+
+		/*特電IPコアにデータ送信*/
+		unsigned short flag = 0;//送信のオプション
+		unsigned long addr = 0x10000;
+
+		USB_W = USBWriteData(addr, X, DATASIZE, flag);
+		if (USB_W == 0)
+			printf("FPGAへのデータ送信に失敗しました\n\n");
+
+		//Sleep(1000);
+	}
+
+	X[0] = 2;
+	X[1] = 0;
+
+	/*特電IPコアにデータ送信*/
+	unsigned short flag = 0;//送信のオプション
+	unsigned long addr = 0x10000;
+
+	USB_W = USBWriteData(addr, X, DATASIZE, flag);
+	if (USB_W == 0)
+		printf("FPGAへのデータ送信に失敗しました\n\n");
+	//else
+		//printf("学習スタート\n\n", USB_W);
+
+}
+
+void doTrainQNetwork_byartix(history* history, experience_reply* reply, float* middle_weight, float* final_weight, int input_dim, int middle_dim, int output_dim) {
+
+	experience_reply exp[BATCH_SIZE];
+	float target_middle_weight[MIDDLE_DIM * INPUT_DIM], target_final_weight[MIDDLE_DIM * OUTPUT_DIM];
+	float target_q_value[OUTPUT_DIM], q_value[OUTPUT_DIM], diff_q_value[OUTPUT_DIM];
+	float middle_output[MIDDLE_DIM];
+	float middle_delta[MIDDLE_DIM * INPUT_DIM], final_delta[MIDDLE_DIM * OUTPUT_DIM];
+	pullOutExperienceMemory(reply, exp, BATCH_SIZE, MEMORY_SIZE);
+
+	//データの送信と学習のスタート
+	sendData_doTrain(exp, middle_weight, final_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
+
+	Sleep(100);
+
+	/*特電IPコアからデータ受信*/
+	static unsigned char X_re[160] = {};//受信データ格納配列
+	//受信結果変換後
+	double TT[80] = { 0 };
+
+	int USB_R, USB_W;
+	int success = 1;
+	while (TT[0] != 1) {
+		for (int c = 0; c < 64; c++) {
+			USB_R = USBReadData(0, X_re, 160, 1);
+			if (USB_R == 0) {
+				printf("Data reception failed so not update-Weight\n\n");
+				success = 0;
+			}
+			trans_double_fromArtix222(X_re, TT);
+			if (TT[0] = 1) {
+				for (int i = 1; i < 70; i++) {
+					//cout << TT[i] << ",";
+				}
+				//cout << "\n";
+				//cout << "\n";
+				for (int i = 0; i < 5; i++) {
+					middle_delta[c * INPUT_DIM + i] = TT[1 + i];
+					//cout << middle_weight[c * INPUT_DIM + i];
+				}
+				for (int i = 0; i < 64; i++) {
+					final_delta[c * OUTPUT_DIM + i] = TT[6 + i];
+				}
+			}
+			//else
+				//cout << "・";
+		}
+	}
+
+	if (success == 1) {
+		for (int i = 0; i < INPUT_DIM * MIDDLE_DIM; i++) {
+			middle_weight[i] = middle_weight[i] - (middle_weight[i] - middle_delta[i]);
+		}
+		for (int i = 0; i < MIDDLE_DIM * OUTPUT_DIM; i++) {
+			final_weight[i] = final_weight[i] - (final_weight[i] - final_delta[i]);
+		}
+	}
+	TKUSBFX3Close();
+
+}
+
+
+/************************
+
+Artix7で学習終わり
 
 ************************/
 
@@ -601,7 +1106,8 @@ int main() {
 	for (int episode = 0; episode < EPISODE; episode++) {
 		if (episode % (EPISODE / 10) == 0)std::cout << "・";
 		if (episode % EPISODE_INTERVAL == 0 && episode != 0) {
-			doTrainQNetwork(history, memory, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
+			//doTrainQNetwork(history, memory, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
+			doTrainQNetwork_byartix(history, memory, middle_weight, combined_weight, INPUT_DIM, MIDDLE_DIM, OUTPUT_DIM);
 			resetEpisode(memory);
 		}
 		int prev_color = 0, now_color = 0, black_put_value = 999, white_put_value = 999;
